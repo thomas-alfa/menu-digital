@@ -67,7 +67,7 @@ label.opt input{width:20px;height:20px;accent-color:var(--green)}
 .item.off{opacity:.55}
 label.opt.off{opacity:.5;cursor:not-allowed}
 [aria-invalid="true"]{border-color:var(--red)!important;outline:2px solid var(--red)}
-#rowCont[hidden]{display:none}
+#rowCont[hidden],#rowRnd[hidden]{display:none}
 </style>
 
 </head>
@@ -107,6 +107,7 @@ label.opt.off{opacity:.5;cursor:not-allowed}
     <div class="sumrow"><span>Subtotal</span><span id="sSub"></span></div>
     <div class="sumrow" id="rowCont"><span id="lCont">Container</span><span id="sCont"></span></div>
     <div class="sumrow"><span id="lSst">SST</span><span id="sSst"></span></div>
+    <div class="sumrow" id="rowRnd"><span>Rounding</span><span id="sRnd"></span></div>
     <div class="total"><span>Total</span><span id="sum"></span></div>
     <label class="f" for="cname">Your name</label>
     <input id="cname" autocomplete="name" placeholder="e.g. Ali">
@@ -200,7 +201,7 @@ async function init(){
     OUTLETS = outlet.map((o, i) => ({ id: o["ID Outlet"], name: o["Nama Outlet"] || ("Outlet " + (i + 1)), wa: (o["No WhatsApp"] || "").replace(/\D/g, ""), col: "Habis Outlet " + (i + 1), active: yes(o["Aktif"]) }));
     opsi.forEach(o => {
       const g = o["Grup Opsi"]; if (!g) return;
-      GROUPS[g] = GROUPS[g] || { t: g.replace(/^(Minuman Buah|Minuman|Lemon Water|Noodle|Nasi Lemak|CurryMee|MHK|Porridge|Bowl Rice|Chicken Chop|Penyet Sambal|Gepuk|MG|KT|MS) ?/, "") || g, min: yes(o["Wajib"]) ? 1 : 0, max: Math.max(1, num(o["Maks Pilih"])), c: [] };
+      GROUPS[g] = GROUPS[g] || { t: g.replace(/^(Minuman Buah|Minuman|Lemon Water|Noodle|Nasi Lemak|CurryMee|MHK|Porridge|Bowl Rice|Chicken Chop|Penyet Sambal|Gepuk|Otak Rolls|MG|KT|MS) ?/, "") || g, min: yes(o["Wajib"]) ? 1 : 0, max: Math.max(1, num(o["Maks Pilih"])), c: [] };
       GROUPS[g].c.push([o["Pilihan"], num(o["Harga Tambahan (RM)"]), yes(o["Habis"])]);
     });
     const byName = new Map();
@@ -245,7 +246,10 @@ const hasChoice = m => m.variants.length > 1 || m.groups.length > 0;
 const fromPrice = m => Math.min(...m.variants.filter(v => !vSold(v)).map(v => v.price).concat(m.variants.length ? [] : [0]));
 const groupsOf = m => m.groups.map(g => GROUPS[g]);
 const unit = (m, v, sel) => m.variants[v].price + sel.reduce((s, [g, c]) => s + groupsOf(m)[g].c[c][1], 0);
-const optText = (m, v, sel) => [m.variants.length > 1 ? m.variants[v].label : ""].concat(sel.map(([g, c]) => groupsOf(m)[g].c[c][0])).filter(Boolean).join(", ");
+// Paid choices show their price, e.g. "Cawan (+RM0.30)", so customers see where every sen comes from.
+const optText = (m, v, sel) => [m.variants.length > 1 ? m.variants[v].label : ""].concat(sel.map(([g, c]) => { const ch = groupsOf(m)[g].c[c]; return ch[1] ? ch[0] + " (+" + CONFIG.cur + ch[1].toFixed(2) + ")" : ch[0]; })).filter(Boolean).join(", ");
+// Container fee only for menu rows ticked in the "Tupperware" column of the Sheet.
+const needsBox = (m, v) => yes(m.variants[v].row["Tupperware"]);
 const code = (m, v) => m.variants[v].code;
 
 function render(){
@@ -272,10 +276,13 @@ function addLine(id, v, sel){
 }
 function totals(){
   const sub = round2(lines.reduce((s, l) => s + l.qty * unit(ITEMS[l.id], l.v, l.sel), 0));
-  const boxes = lines.reduce((s, l) => s + (ITEMS[l.id].jenis === "Makanan" ? l.qty : 0), 0);
+  const boxes = lines.reduce((s, l) => s + (needsBox(ITEMS[l.id], l.v) ? l.qty : 0), 0);
   const cont = round2(boxes * CONTAINER);
   const sst = round2((sub + cont) * SST);
-  return { sub, boxes, cont, sst, total: round2(sub + cont + sst) };
+  const raw = round2(sub + cont + sst);
+  // Same as FeedMe/cashier: total rounded to the nearest 10 sen (6.57 -> 6.60, 7.62 -> 7.60).
+  const total = Math.round(raw * 10 + 1e-9) / 10;
+  return { sub, boxes, cont, sst, rnd: round2(total - raw), total };
 }
 function refresh(){
   const count = lines.reduce((s, l) => s + l.qty, 0), t = totals();
@@ -288,6 +295,8 @@ function refresh(){
   $("sCont").textContent = rm(t.cont);
   $("lSst").textContent = "SST " + round2(SST * 100) + "%";
   $("sSst").textContent = rm(t.sst);
+  $("rowRnd").hidden = !t.rnd;
+  $("sRnd").textContent = (t.rnd < 0 ? "- " : "") + rm(Math.abs(t.rnd));
   $("sum").textContent = rm(t.total);
   $("lines").innerHTML = lines.map((l, i) => { const m = ITEMS[l.id]; return `<div class="row"><div class="n"><b>${esc(m.name)}</b><span class="o">${esc(optText(m, l.v, l.sel))}</span></div><div class="step"><button data-act="lsub" data-i="${i}" aria-label="Remove one ${esc(m.name)}">−</button><output>${l.qty}</output><button class="add" data-act="ladd" data-i="${i}" aria-label="Add one ${esc(m.name)}">+</button></div><span>${rm(l.qty * unit(m, l.v, l.sel))}</span></div>`; }).join("");
   if (!count) $("sheet").hidden = true;
@@ -358,7 +367,7 @@ $("send").onclick = () => {
   $("cname").removeAttribute("aria-invalid");
   const o = OUTLETS[outletIdx], t = totals(), note = $("note").value.trim();
   const body = lines.map(l => { const m = ITEMS[l.id], c = code(m, l.v), ot = optText(m, l.v, l.sel); return `${l.qty} x ${c ? c + " " : ""}${m.name}${ot ? " (" + ot + ")" : ""} - ${rm(l.qty * unit(m, l.v, l.sel))}`; }).join("\n");
-  const msg = `New takeaway order - ${o.name}\nName: ${name}\nPickup: ${$("pickup").value}\n\n${body}\n\nSubtotal: ${rm(t.sub)}${t.boxes ? "\nContainer (" + t.boxes + "): " + rm(t.cont) : ""}\nSST ${round2(SST * 100)}%: ${rm(t.sst)}\nTotal: ${rm(t.total)}${note ? "\n\nNotes: " + note : ""}`;
+  const msg = `New takeaway order - ${o.name}\nName: ${name}\nPickup: ${$("pickup").value}\n\n${body}\n\nSubtotal: ${rm(t.sub)}${t.boxes ? "\nContainer (" + t.boxes + "): " + rm(t.cont) : ""}\nSST ${round2(SST * 100)}%: ${rm(t.sst)}${t.rnd ? "\nRounding: " + (t.rnd < 0 ? "-" : "") + rm(Math.abs(t.rnd)) : ""}\nTotal: ${rm(t.total)}${note ? "\n\nNotes: " + note : ""}`;
   const url = "https://wa.me/" + (o.wa || CONFIG.waFallback) + "?text=" + encodeURIComponent(msg);
   $("waLink").href = url; $("waMsg").value = msg; $("waBox").hidden = false;
   if (CONFIG.api){
