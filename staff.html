@@ -83,7 +83,7 @@ async function login(){
   $("lmsg").textContent = "Memeriksa…";
   try {
     const r = await post({ action: "pin" });
-    if (!r.ok){ $("lmsg").textContent = "PIN salah."; PIN = ""; return; }
+    if (!r.ok){ $("lmsg").textContent = r.error || "PIN salah."; PIN = ""; store.set("staffPin", ""); return; }
     store.set("staffPin", PIN);
     $("login").hidden = true; $("app").hidden = false;
     load();
